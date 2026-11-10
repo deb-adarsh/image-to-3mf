@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
+from image_to_3mf.bambu import load_bambu_project
 from image_to_3mf.compose import remove_specks, scale_to_mm
 from image_to_3mf.export_3mf import Part, write_3mf
 from image_to_3mf.export_stl import write_stl
@@ -51,6 +52,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=1.0,
         help=f"tracing smoothness, 0 (sharp) to {MAX_SMOOTH} (default: 1.0)",
     )
+    parser.add_argument(
+        "--bambu-project",
+        type=Path,
+        metavar="TEMPLATE.3mf",
+        help="a project saved by Bambu Studio for your printer, with at least as many filaments "
+        "as colours: the output reuses its printer, process and filament settings, with the "
+        "filament colours set from the image",
+    )
     return parser
 
 
@@ -60,6 +69,9 @@ def run(args: argparse.Namespace) -> Path:
         raise ValueError(f"output must end in {' or '.join(FORMATS)}, got {output.name}")
     if any(d <= 0 for d in args.depths):
         raise ValueError("depths must be positive")
+    if args.bambu_project and output.suffix.lower() != ".3mf":
+        raise ValueError("--bambu-project needs a .3mf output")
+    project = load_bambu_project(args.bambu_project) if args.bambu_project else None
 
     rgba = load_image(args.input)
     height_px, width_px = rgba.shape[:2]
@@ -83,7 +95,7 @@ def run(args: argparse.Namespace) -> Path:
             Part(name=f"Colour {i + 1} {c.hex}", color=c.color, mesh=m)
             for i, (c, m) in enumerate(zip(colours, meshes))
         ]
-        write_3mf(output, parts, name=args.input.stem)
+        write_3mf(output, parts, name=args.input.stem, project=project)
 
     boxes = np.array([b.bounding_box() for b in bodies])
     size = boxes[:, 3:].max(axis=0) - boxes[:, :3].min(axis=0)
@@ -91,8 +103,10 @@ def run(args: argparse.Namespace) -> Path:
         f"{args.input.name} -> {output}: {len(bodies)} colour(s), "
         f"{size[0]:.1f} x {size[1]:.1f} x {size[2]:.1f} mm"
     )
+    if project:
+        print(f"  Bambu Studio project: settings from {args.bambu_project.name}")
     for i, (c, g, d) in enumerate(zip(colours, layers, depths)):
-        print(f"  {i + 1}. {c.hex}  depth {d:g} mm  {len(g.geoms)} part(s)  {g.area:.1f} mm2")
+        print(f"  filament {i + 1}: {c.hex}  depth {d:g} mm  {len(g.geoms)} part(s)  {g.area:.1f} mm2")
     return output
 
 

@@ -11,8 +11,8 @@ This is a proof of concept. See [CLAUDE.md](CLAUDE.md) for the full plan, pipeli
 |---|---|
 | 1. Single colour: black-and-white logo → extruded STL | Done |
 | 2. Multi-colour geometry: N colours → N watertight bodies in a core-spec 3MF | Done |
-| 3. Bambu-ready: filaments pre-assigned in Bambu Studio | Next |
-| 4. Polish: backing plate, margin, min-feature cleanup, text | |
+| 3. Bambu-ready: filaments pre-assigned in Bambu Studio | Built, not yet checked in Bambu Studio |
+| 4. Polish: backing plate, margin, min-feature cleanup, text | Next |
 | 5. Test prints | |
 
 ## Usage
@@ -35,6 +35,27 @@ single-colour STL instead.
 | `--depths` | Depth in mm per colour, largest colour first; the last value repeats | 2 |
 | `--smooth` | Tracing smoothness, 0 (sharp corners) to 1.334 | 1.0 |
 | `-o`, `--output` | Output path, `.3mf` or `.stl` | `out/<input>.3mf` |
+| `--bambu-project` | A project 3MF saved by Bambu Studio to use as a template (see below) | none |
+
+### Bambu Studio and OrcaSlicer
+
+Every 3MF carries `Metadata/model_settings.config`, which gives colour 1 filament 1,
+colour 2 filament 2, and so on (largest colour first), and places the object in the
+middle of a 256 mm plate.
+
+Filament colours and types live in `Metadata/project_settings.config`. Bambu Studio
+loads that file as the project's complete printer, process and filament setup, so a
+file holding only filament colours would replace your printer settings with defaults.
+To get a ready-to-print project instead:
+
+1. In Bambu Studio, select your printer and load at least as many filaments as the
+   image has colours (for example, sync your AMS). Add any object (a cube will do;
+   only the settings are used) and save the project as your template.
+2. Pass it with `--bambu-project template.3mf`.
+
+The output then reuses the template's printer, process and filament settings, sets
+filament colours 1..N to the image colours, and centres the object on that printer's
+plate. Filament types stay as they are in the template.
 
 How the image is read:
 

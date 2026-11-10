@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
@@ -10,6 +11,7 @@ import pytest
 import trimesh
 from PIL import Image
 
+from conftest import TEMPLATE_SETTINGS, write_bambu_template
 from image_to_3mf.cli import main
 from image_to_3mf.export_3mf import CORE_NS, MODEL_PATH
 
@@ -83,7 +85,32 @@ def test_sample_apple_has_one_watertight_body_per_colour(tmp_path, capsys):
     assert all(m.is_watertight and m.volume > 0 for _, m in parts)
     # Depths: the first colour 2 mm, the rest repeat the last value, 3 mm.
     assert [round(m.bounds[1][2], 3) for _, m in parts] == [2, 3, 3, 3]
-    assert capsys.readouterr().out.count("1 part(s)") == 4
+    out = capsys.readouterr().out
+    assert out.count("1 part(s)") == 4
+    assert "filament 4: #FAFAFA" in out
+
+
+def test_bambu_project_template(tmp_path, capsys, bambu_template):
+    out = tmp_path / "apple.3mf"
+    assert main([str(SAMPLES / "apple.png"), "-o", str(out), "--bambu-project", str(bambu_template)]) == 0
+    with zipfile.ZipFile(out) as zf:
+        settings = json.loads(zf.read("Metadata/project_settings.config"))
+    assert settings["filament_colour"] == ["#C81E28", "#3CA03C", "#6E461E", "#FAFAFA"]
+    assert _strict_warnings(out) == 0
+
+
+def test_bambu_project_needs_enough_filaments(tmp_path, capsys):
+    two_filaments = write_bambu_template(
+        tmp_path / "two.3mf", dict(TEMPLATE_SETTINGS, filament_colour=["#FFFFFF", "#000000"])
+    )
+    args = [str(SAMPLES / "apple.png"), "-o", str(tmp_path / "a.3mf"), "--bambu-project", str(two_filaments)]
+    assert main(args) == 1
+    assert "add filaments in Bambu Studio" in capsys.readouterr().err
+
+
+def test_bambu_project_needs_3mf_output(tmp_path, capsys, bambu_template):
+    args = [str(SAMPLES / "apple.png"), "-o", str(tmp_path / "a.stl"), "--bambu-project", str(bambu_template)]
+    assert main(args) == 1
 
 
 def test_colors_override(tmp_path, capsys):
