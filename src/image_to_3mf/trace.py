@@ -1,4 +1,4 @@
-"""Stage 2: trace a binary mask into smooth vector outlines with holes."""
+"""Stage 2: trace colour masks into smooth vector outlines with holes."""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ import numpy as np
 import potrace
 import shapely
 from shapely.geometry import MultiPolygon, Polygon
+
+from image_to_3mf.geometry import absorb_small_pieces, as_multipolygon
 
 # Potrace's alphamax: 0 keeps every corner sharp, 1.334 is the smoothest.
 MAX_SMOOTH = 1.334
@@ -43,6 +45,46 @@ def trace_mask(
     rings = [_flatten_curve(curve, curve_tolerance) - 1.0 for curve in path]
     rings = [r for r in rings if len(r) >= 3]
     return _rings_to_polygons(rings)
+
+
+def trace_layers(
+    masks: list[np.ndarray],
+    smooth: float = 1.0,
+    turdsize: int = 2,
+    sliver_area: float = 4.0,
+) -> list[MultiPolygon]:
+    """Trace non-overlapping colour masks into polygons that tile without gaps.
+
+    Tracing each mask on its own would give every shared border two slightly
+    different outlines, leaving hairline gaps and overlaps. Instead, layer
+    ``i`` is traced as the union of masks ``i`` and above, and each layer's
+    polygons are what its union covers beyond the union of the layers above
+    it. Most shared borders are then traced once, and the layers cannot
+    overlap. Tiny fragments left where an outline was traced twice are merged
+    into a neighbouring layer.
+
+    :param masks: Boolean masks of equal shape that do not overlap. Order
+        matters: put the colour with the most outline first.
+    :param sliver_area: Merge fragments smaller than this many square pixels.
+    :return: One MultiPolygon per mask, in pixel coordinates (see trace_mask).
+    """
+    if not masks:
+        return []
+
+    covered = np.zeros_like(masks[0], dtype=bool)
+    unions = []
+    for mask in reversed(masks):
+        covered = covered | mask
+        unions.append(trace_mask(covered, smooth=smooth, turdsize=turdsize))
+    unions.reverse()
+
+    # Each union must sit inside the one below it.
+    for i in range(1, len(unions)):
+        unions[i] = as_multipolygon(unions[i].intersection(unions[i - 1]))
+
+    layers = [as_multipolygon(unions[i].difference(unions[i + 1])) for i in range(len(unions) - 1)]
+    layers.append(unions[-1])
+    return absorb_small_pieces(layers, sliver_area)
 
 
 def _flatten_curve(curve, tolerance: float) -> np.ndarray:
@@ -100,12 +142,3 @@ def _rings_to_polygons(rings: list[np.ndarray]) -> MultiPolygon:
     merged = shapely.unary_union(polygons)
     return as_multipolygon(merged)
 
-
-def as_multipolygon(geom) -> MultiPolygon:
-    if geom.is_empty:
-        return MultiPolygon()
-    if isinstance(geom, Polygon):
-        return MultiPolygon([geom])
-    if isinstance(geom, MultiPolygon):
-        return geom
-    return MultiPolygon([g for g in getattr(geom, "geoms", []) if isinstance(g, Polygon)])

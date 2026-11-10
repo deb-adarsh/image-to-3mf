@@ -1,4 +1,4 @@
-"""Stage 4: extrude 2D layers into watertight solids."""
+"""Stage 4: extrude 2D layers into watertight solids, one per colour."""
 
 from __future__ import annotations
 
@@ -29,9 +29,28 @@ def extrude(geom: MultiPolygon, height: float, z0: float = 0.0) -> Manifold:
 
     section = CrossSection(contours, FillRule.EvenOdd)
     solid = Manifold.extrude(section, height).translate((0.0, 0.0, z0))
-    if solid.status() != Error.NoError:
-        raise RuntimeError(f"extrusion failed: {solid.status()}")
+    _check(solid)
     return solid
+
+
+def extrude_layers(layers: list[MultiPolygon], depths: list[float]) -> list[Manifold]:
+    """Extrude each colour layer from the bed up to its own depth.
+
+    Later layers sit on top of earlier ones: wherever bodies would overlap,
+    the later (upper) body is subtracted from the earlier (lower) one, so no
+    two colour bodies share any volume.
+    """
+    if len(layers) != len(depths):
+        raise ValueError(f"got {len(layers)} layers but {len(depths)} depths")
+
+    bodies = [extrude(layer, depth) for layer, depth in zip(layers, depths)]
+    above = Manifold()
+    for i in reversed(range(len(bodies))):
+        body = bodies[i] - above
+        _check(body)
+        above = above + body
+        bodies[i] = body
+    return bodies
 
 
 def to_mesh(solid: Manifold) -> Mesh:
@@ -40,3 +59,8 @@ def to_mesh(solid: Manifold) -> Mesh:
     vertices = np.asarray(mesh.vert_properties, dtype=float)[:, :3]
     triangles = np.asarray(mesh.tri_verts, dtype=np.int64)
     return Mesh(vertices=vertices, triangles=triangles)
+
+
+def _check(solid: Manifold) -> None:
+    if solid.status() != Error.NoError:
+        raise RuntimeError(f"geometry operation failed: {solid.status()}")

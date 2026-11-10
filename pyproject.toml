@@ -25,6 +25,7 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "lib3mf>=2.5.0",
     "pytest>=9.2.0",
     "trimesh>=5.2.0",
 ]

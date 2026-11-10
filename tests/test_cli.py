@@ -1,18 +1,23 @@
 from __future__ import annotations
 
+import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
+import lib3mf
 import numpy as np
 import pytest
 import trimesh
 from PIL import Image
 
 from image_to_3mf.cli import main
+from image_to_3mf.export_3mf import CORE_NS, MODEL_PATH
 
 SAMPLES = Path(__file__).parent.parent / "samples"
+NS = {"m": CORE_NS}
 
 
-def _write_logo(path):
+def _write_ring(path):
     """A dark ring on white: one part with one hole."""
     yy, xx = np.mgrid[0:120, 0:200]
     r2 = (xx - 100) ** 2 + (yy - 60) ** 2
@@ -22,10 +27,32 @@ def _write_logo(path):
     Image.fromarray(img).save(path)
 
 
-def test_end_to_end_writes_watertight_stl(tmp_path, capsys):
-    src = tmp_path / "ring.png"
-    out = tmp_path / "ring.stl"
-    _write_logo(src)
+def _read_parts(path) -> list[tuple[str, trimesh.Trimesh]]:
+    """(display colour, mesh) for every mesh object in a 3MF."""
+    root = ET.fromstring(zipfile.ZipFile(path).read(MODEL_PATH))
+    colours = [b.get("displaycolor") for b in root.iterfind(".//m:base", NS)]
+    parts = []
+    for obj in root.iterfind(".//m:object", NS):
+        mesh = obj.find("m:mesh", NS)
+        if mesh is None:
+            continue
+        v = [[float(x.get(k)) for k in "xyz"] for x in mesh.iterfind("m:vertices/m:vertex", NS)]
+        t = [[int(x.get(k)) for k in ("v1", "v2", "v3")] for x in mesh.iterfind("m:triangles/m:triangle", NS)]
+        parts.append((colours[int(obj.get("pindex"))], trimesh.Trimesh(v, t, process=False)))
+    return parts
+
+
+def _strict_warnings(path) -> int:
+    model = lib3mf.get_wrapper().CreateModel()
+    reader = model.QueryReader("3mf")
+    reader.SetStrictModeActive(True)
+    reader.ReadFromFile(str(path))
+    return reader.GetWarningCount()
+
+
+def test_ring_to_stl(tmp_path, capsys):
+    src, out = tmp_path / "ring.png", tmp_path / "ring.stl"
+    _write_ring(src)
 
     assert main([str(src), "-o", str(out), "--width", "100", "--depths", "3"]) == 0
 
@@ -37,14 +64,39 @@ def test_end_to_end_writes_watertight_stl(tmp_path, capsys):
     assert "1 part(s)" in capsys.readouterr().out
 
 
+def test_sample_logo(tmp_path, capsys):
+    out = tmp_path / "logo.3mf"
+    assert main([str(SAMPLES / "logo_bw.png"), "-o", str(out), "--width", "80"]) == 0
+    [(colour, mesh)] = _read_parts(out)
+    assert mesh.is_watertight
+    # Ring, star and the three letters of "3MF".
+    assert "5 part(s)" in capsys.readouterr().out
+
+
+def test_sample_apple_has_one_watertight_body_per_colour(tmp_path, capsys):
+    out = tmp_path / "apple.3mf"
+    assert main([str(SAMPLES / "apple.png"), "-o", str(out), "--depths", "2", "3"]) == 0
+
+    assert _strict_warnings(out) == 0
+    parts = _read_parts(out)
+    assert [c for c, _ in parts] == ["#C81E28FF", "#3CA03CFF", "#6E461EFF", "#FAFAFAFF"]
+    assert all(m.is_watertight and m.volume > 0 for _, m in parts)
+    # Depths: the first colour 2 mm, the rest repeat the last value, 3 mm.
+    assert [round(m.bounds[1][2], 3) for _, m in parts] == [2, 3, 3, 3]
+    assert capsys.readouterr().out.count("1 part(s)") == 4
+
+
+def test_colors_override(tmp_path, capsys):
+    out = tmp_path / "apple.3mf"
+    assert main([str(SAMPLES / "apple.png"), "-o", str(out), "--colors", "2"]) == 0
+    assert len(_read_parts(out)) == 2
+
+
+def test_unknown_output_format(tmp_path, capsys):
+    assert main([str(SAMPLES / "apple.png"), "-o", str(tmp_path / "a.obj")]) == 1
+    assert "must end in" in capsys.readouterr().err
+
+
 def test_missing_input_returns_error(tmp_path, capsys):
     assert main([str(tmp_path / "nope.png")]) == 1
     assert "error:" in capsys.readouterr().err
-
-
-def test_sample_logo(tmp_path, capsys):
-    out = tmp_path / "logo.stl"
-    assert main([str(SAMPLES / "logo_bw.png"), "-o", str(out), "--width", "80"]) == 0
-    assert trimesh.load(out).is_watertight
-    # Ring, star and the three letters of "3MF".
-    assert "5 part(s)" in capsys.readouterr().out

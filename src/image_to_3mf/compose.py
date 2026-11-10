@@ -1,7 +1,6 @@
 """Stage 3: turn traced pixel outlines into final 2D layers in millimetres.
 
-Milestone 1 only scales to physical size. Speck removal, minimum feature
-width, backing plate and text arrive with milestone 4.
+Minimum feature width, backing plate and text arrive with milestone 4.
 """
 
 from __future__ import annotations
@@ -9,7 +8,10 @@ from __future__ import annotations
 import shapely
 from shapely.geometry import MultiPolygon
 
-from image_to_3mf.trace import as_multipolygon
+from image_to_3mf.geometry import absorb_small_pieces, as_multipolygon
+
+# Footprint of a 0.4 mm nozzle: anything smaller cannot print as its own colour.
+MIN_SPECK_AREA = 0.16  # mm^2
 
 
 def scale_to_mm(
@@ -28,3 +30,14 @@ def scale_to_mm(
     )
     # Flipping y reverses ring orientation; normalise it back.
     return as_multipolygon(shapely.orient_polygons(flipped))
+
+
+def remove_specks(
+    layers: list[MultiPolygon], min_area: float = MIN_SPECK_AREA
+) -> list[MultiPolygon]:
+    """Fold pieces too small to print into the neighbouring colour.
+
+    Layers must not overlap; the result still covers the same area, except
+    for specks that touch no other colour, which are dropped.
+    """
+    return absorb_small_pieces(layers, min_area)

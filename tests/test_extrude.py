@@ -5,7 +5,7 @@ import pytest
 import trimesh
 from shapely.geometry import MultiPolygon, Polygon, box
 
-from image_to_3mf.extrude import extrude, to_mesh
+from image_to_3mf.extrude import extrude, extrude_layers, to_mesh
 
 
 def _trimesh(solid) -> trimesh.Trimesh:
@@ -49,3 +49,30 @@ def test_empty_geometry_raises():
 def test_non_positive_height_raises():
     with pytest.raises(ValueError):
         extrude(MultiPolygon([box(0, 0, 1, 1)]), height=0)
+
+
+# --- several colour layers ---------------------------------------------------
+
+
+def test_layers_with_different_depths_do_not_overlap():
+    layers = [MultiPolygon([box(0, 0, 10, 10)]), MultiPolygon([box(10, 0, 20, 10)])]
+    low, high = extrude_layers(layers, [1.0, 3.0])
+    assert low.volume() == pytest.approx(100)
+    assert high.volume() == pytest.approx(300)
+    assert (low ^ high).volume() == pytest.approx(0, abs=1e-9)
+    assert _trimesh(low).is_watertight and _trimesh(high).is_watertight
+
+
+def test_upper_layer_is_cut_out_of_lower_layer():
+    # Overlapping footprints: the later (upper) layer wins the shared volume.
+    lower = MultiPolygon([box(0, 0, 10, 10)])
+    upper = MultiPolygon([box(5, 0, 15, 10)])
+    low, high = extrude_layers([lower, upper], [2.0, 2.0])
+    assert high.volume() == pytest.approx(200)
+    assert low.volume() == pytest.approx(100)
+    assert (low ^ high).volume() == pytest.approx(0, abs=1e-9)
+
+
+def test_depth_count_must_match():
+    with pytest.raises(ValueError):
+        extrude_layers([MultiPolygon([box(0, 0, 1, 1)])], [1.0, 2.0])

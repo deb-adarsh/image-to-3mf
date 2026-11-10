@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from shapely.geometry import MultiPolygon, box
 
-from image_to_3mf.compose import scale_to_mm
+from image_to_3mf.compose import remove_specks, scale_to_mm
 
 
 def test_scales_image_width_and_flips_y():
@@ -24,3 +24,11 @@ def test_outer_rings_are_counter_clockwise():
 def test_rejects_non_positive_width():
     with pytest.raises(ValueError):
         scale_to_mm(MultiPolygon([box(0, 0, 1, 1)]), 10, 10, 0)
+
+
+def test_remove_specks_folds_tiny_piece_into_neighbour():
+    big = MultiPolygon([box(0, 0, 10, 10)])
+    tiny = MultiPolygon([box(10, 0, 10.2, 0.2)])  # 0.04 mm2, below a nozzle's footprint
+    big2, tiny2 = remove_specks([big, tiny])
+    assert tiny2.is_empty
+    assert big2.area == pytest.approx(100.04)
