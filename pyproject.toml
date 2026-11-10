@@ -1,0 +1,30 @@
+[project]
+name = "image-to-3mf"
+version = "0.1.0"
+description = "Convert flat artwork into multi-colour, print-ready 3MF files for Bambu Studio / OrcaSlicer."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "manifold3d>=3.5.4",
+    "numpy>=2.4.6",
+    "opencv-python-headless>=5.0.0.93",
+    "pillow>=13.0.0",
+    "potracer>=0.0.4",
+    "shapely>=2.2.0",
+]
+
+[project.scripts]
+image-to-3mf = "image_to_3mf.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11,<0.12"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "trimesh>=5.2.0",
+]

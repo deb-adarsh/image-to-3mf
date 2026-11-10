@@ -1,0 +1,30 @@
+"""Stage 3: turn traced pixel outlines into final 2D layers in millimetres.
+
+Milestone 1 only scales to physical size. Speck removal, minimum feature
+width, backing plate and text arrive with milestone 4.
+"""
+
+from __future__ import annotations
+
+import shapely
+from shapely.geometry import MultiPolygon
+
+from image_to_3mf.trace import as_multipolygon
+
+
+def scale_to_mm(
+    geom: MultiPolygon, image_width_px: int, image_height_px: int, width_mm: float
+) -> MultiPolygon:
+    """Map pixel coordinates (y down) to millimetres (y up, origin bottom-left).
+
+    The whole image, not just the artwork, is scaled to ``width_mm`` so the
+    output keeps the image's framing.
+    """
+    if width_mm <= 0:
+        raise ValueError(f"width_mm must be positive, got {width_mm}")
+    scale = width_mm / image_width_px
+    flipped = shapely.transform(
+        geom, lambda xy: (xy * [1.0, -1.0] + [0.0, image_height_px]) * scale
+    )
+    # Flipping y reverses ring orientation; normalise it back.
+    return as_multipolygon(shapely.orient_polygons(flipped))
