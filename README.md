@@ -81,8 +81,8 @@ How the image becomes a print:
 - Text takes the artwork colour that contrasts most with the plate.
 - Where colour bodies would touch or overlap, the later colour wins, so no two
   bodies share any volume. Inlays are cut out of the plate.
-- The whole image is scaled to `--width`, so blank margins around the artwork are
-  kept in the text placement but not in the plate.
+- The whole image is scaled to `--width`, so with blank margins in the image the
+  artwork, and the plate under it, come out narrower than `--width`.
 
 ## Development
 
