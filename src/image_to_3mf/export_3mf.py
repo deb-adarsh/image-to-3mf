@@ -50,6 +50,23 @@ class Part:
     name: str
     color: tuple[int, int, int]  # sRGB, 0-255
     mesh: Mesh
+    filament: int | None = None  # 1-based slot; default: the part's position
+
+
+def filament_slots(parts: list[Part]) -> list[int]:
+    """Each part's 1-based filament slot."""
+    return [p.filament if p.filament is not None else i + 1 for i, p in enumerate(parts)]
+
+
+def slot_colours(parts: list[Part]) -> list[tuple[int, int, int]]:
+    """The colour of each filament slot 1..N (from the first part using it)."""
+    slots = filament_slots(parts)
+    colours: dict[int, tuple[int, int, int]] = {}
+    for slot, part in zip(slots, parts):
+        colours.setdefault(slot, part.color)
+    if sorted(colours) != list(range(1, len(colours) + 1)):
+        raise ValueError(f"filament slots must be 1..N without gaps, got {sorted(colours)}")
+    return [colours[s] for s in range(1, len(colours) + 1)]
 
 
 def write_3mf(
@@ -60,7 +77,8 @@ def write_3mf(
 ) -> Path:
     """Write ``parts`` as one multi-part object to a 3MF file and return its path.
 
-    Part ``i`` is assigned filament slot ``i + 1``. With a template ``project``,
+    Each part prints with its ``filament`` slot (default: its position, 1-based).
+    With a template ``project``,
     the file becomes a Bambu Studio project that reuses the template's printer,
     process and filament settings, with filament colours set from the parts.
     """
@@ -73,12 +91,13 @@ def write_3mf(
     centre = project.plate_centre if project else bambu.DEFAULT_PLATE_CENTRE
     translation = _centre_on(meshes, centre)
     application = project.application if project else APPLICATION
-    settings = project.with_colours([p.color for p in parts]) if project else None
+    colours = slot_colours(parts)  # also checks the slots run 1..N
+    settings = project.with_colours(colours) if project else None
 
     parent_id = _FIRST_PART_ID + len(parts)
     part_info = [
-        (_FIRST_PART_ID + i, part.name, len(triangles))
-        for i, (part, (_, triangles)) in enumerate(zip(parts, meshes))
+        (_FIRST_PART_ID + i, part.name, len(triangles), slot)
+        for i, (part, (_, triangles), slot) in enumerate(zip(parts, meshes, filament_slots(parts)))
     ]
 
     with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:

@@ -120,3 +120,13 @@ def test_load_image_returns_rgba(tmp_path):
     img = load_image(path)
     assert img.shape == (5, 7, 4)
     assert img.dtype == np.uint8
+
+
+def test_reports_the_background_colour():
+    img = rgba(40, 40, color=(255, 255, 255))
+    img[10:30, 10:30, :3] = BLACK
+    assert quantize(img).background == (255, 255, 255)
+
+    img = rgba(40, 40, color=(0, 0, 0), alpha=0)
+    img[10:30, 10:30] = (*BLACK, 255)
+    assert quantize(img).background is None

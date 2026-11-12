@@ -5,7 +5,7 @@ import pytest
 import trimesh
 from shapely.geometry import MultiPolygon, Polygon, box
 
-from image_to_3mf.extrude import extrude, extrude_layers, to_mesh
+from image_to_3mf.extrude import extrude, extrude_layers, to_mesh, union
 
 
 def _trimesh(solid) -> trimesh.Trimesh:
@@ -76,3 +76,26 @@ def test_upper_layer_is_cut_out_of_lower_layer():
 def test_depth_count_must_match():
     with pytest.raises(ValueError):
         extrude_layers([MultiPolygon([box(0, 0, 1, 1)])], [1.0, 2.0])
+
+
+def test_bottoms_stack_layers():
+    plate = MultiPolygon([box(0, 0, 10, 10)])
+    top = MultiPolygon([box(2, 2, 8, 8)])
+    p, t = extrude_layers([plate, top], [1.5, 1.0], [0.0, 1.5])
+    assert np.allclose(t.bounding_box(), (2, 2, 1.5, 8, 8, 2.5))
+    assert p.volume() == pytest.approx(150)  # nothing to cut: the top sits on the plate
+
+
+def test_bottoms_inlay_cuts_into_the_plate():
+    plate = MultiPolygon([box(0, 0, 10, 10)])
+    inlay = MultiPolygon([box(2, 2, 8, 8)])
+    p, i = extrude_layers([plate, inlay], [2.0, 0.6], [0.0, 1.4])
+    assert p.volume() == pytest.approx(200 - 36 * 0.6)
+    assert (p ^ i).volume() == pytest.approx(0, abs=1e-9)
+
+
+def test_union_merges_bodies():
+    a, b = extrude_layers([MultiPolygon([box(0, 0, 1, 1)]), MultiPolygon([box(1, 0, 2, 1)])], [1, 1])
+    merged = union([a, b])
+    assert merged.volume() == pytest.approx(2)
+    assert len(merged.decompose()) == 1

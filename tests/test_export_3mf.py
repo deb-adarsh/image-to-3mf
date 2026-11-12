@@ -162,3 +162,18 @@ def test_names_are_escaped():
 def test_no_parts_raises(tmp_path):
     with pytest.raises(ValueError):
         write_3mf(tmp_path / "empty.3mf", [])
+
+
+def test_parts_can_share_a_filament(tmp_path):
+    low, high = _two_parts()
+    parts = [Part("Base", (200, 30, 40), low.mesh, filament=1), Part("Red", (200, 30, 40), high.mesh, filament=1)]
+    path = write_3mf(tmp_path / "shared.3mf", parts)
+    settings = ET.fromstring(_read(path, MODEL_SETTINGS_PATH))
+    slots = [m.get("value") for m in settings.iter("metadata") if m.get("key") == "extruder"]
+    assert slots == ["1", "1", "1"]  # object default, then both parts
+
+
+def test_filament_slots_must_not_skip(tmp_path):
+    low, high = _two_parts()
+    with pytest.raises(ValueError, match="without gaps"):
+        write_3mf(tmp_path / "x.3mf", [Part("a", (0, 0, 0), low.mesh, filament=1), Part("b", (1, 1, 1), high.mesh, filament=3)])

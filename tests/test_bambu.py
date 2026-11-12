@@ -14,7 +14,7 @@ RED, GREEN = (200, 30, 40), (60, 160, 60)
 
 
 def test_model_settings_assign_one_filament_per_part():
-    root = ET.fromstring(model_settings_xml(9, "apple", [(2, "Red", 10), (3, "Green", 20)]))
+    root = ET.fromstring(model_settings_xml(9, "apple", [(2, "Red", 10, 1), (3, "Green", 20, 2)]))
     [obj] = root.findall("object")
     assert obj.get("id") == "9"
     meta = {m.get("key"): m.get("value") for m in obj.findall("metadata") if m.get("key")}
@@ -31,7 +31,7 @@ def test_model_settings_assign_one_filament_per_part():
 
 
 def test_model_settings_escape_names():
-    root = ET.fromstring(model_settings_xml(3, 'a "b" & <c>', [(2, "x & y", 1)]))
+    root = ET.fromstring(model_settings_xml(3, 'a "b" & <c>', [(2, "x & y", 1, 1)]))
     assert root.find("object/metadata").get("value") == 'a "b" & <c>'
 
 

@@ -72,8 +72,36 @@ def apple(size: int = 512) -> Image.Image:
     return im.resize((size, size), Image.Resampling.LANCZOS)
 
 
+def diagram(size: int = 512) -> Image.Image:
+    """Sample 3: a two-colour line diagram with strokes 1-3 px wide, on white.
+
+    At the default 80 mm width a pixel is 0.16 mm, so every stroke here is
+    thinner than the 0.8 mm minimum feature and has to be thickened.
+    """
+    s = size * SUPERSAMPLE
+    im = Image.new("RGB", (s, s), "white")
+    d = ImageDraw.Draw(im)
+    blue = (30, 60, 160)
+    px = SUPERSAMPLE  # one output pixel
+
+    # Three boxes with 2 px outlines.
+    boxes = [(0.10, 0.12), (0.60, 0.12), (0.35, 0.62)]
+    w, h = 0.28 * s, 0.22 * s
+    for bx, by in boxes:
+        d.rectangle([bx * s, by * s, bx * s + w, by * s + h], outline=blue, width=2 * px)
+    # Connectors, 1 px wide.
+    d.line([(0.38 * s, 0.23 * s), (0.60 * s, 0.23 * s)], fill=blue, width=px)
+    d.line([(0.24 * s, 0.34 * s), (0.42 * s, 0.62 * s)], fill=blue, width=px)
+    d.line([(0.74 * s, 0.34 * s), (0.56 * s, 0.62 * s)], fill=blue, width=px)
+    # A 3 px ring in the middle box.
+    cx, cy, r = 0.49 * s, 0.73 * s, 0.06 * s
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], outline=blue, width=3 * px)
+
+    return im.resize((size, size), Image.Resampling.LANCZOS)
+
+
 def main() -> None:
-    for name, image in [("logo_bw.png", logo_bw()), ("apple.png", apple())]:
+    for name, image in [("logo_bw.png", logo_bw()), ("apple.png", apple()), ("diagram.png", diagram())]:
         image.save(HERE / name)
         print(f"wrote {HERE / name}")
 

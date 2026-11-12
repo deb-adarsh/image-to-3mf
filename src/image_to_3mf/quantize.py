@@ -24,6 +24,7 @@ _FLAT_RANGE = 20  # max RGB range in a 3x3 neighbourhood for a pixel to count as
 _MERGE_DELTA_E = 15.0  # auto-detected colours closer than this (CIE76) are one colour
 _MIN_SHARE = 0.002  # an auto-detected colour must cover this share of flat pixels
 _BLEND_TOLERANCE = 24.0  # RGB distance within which an edge pixel is a blend of neighbours
+_OVERSHOOT = 0.25  # resampling rings past a blend's end colour by up to this share
 _NEIGHBOURHOOD = 4  # radius in px to look for the colours around an edge pixel
 _MAX_SAMPLES = 200_000  # pixels used to build the palette
 
@@ -40,13 +41,21 @@ class ColorMask:
         return "#{:02X}{:02X}{:02X}".format(*self.color)
 
 
+class Palette(list):
+    """The artwork's colours (a list of ColorMask), plus the removed background."""
+
+    def __init__(self, layers=(), background: tuple[int, int, int] | None = None):
+        super().__init__(layers)
+        self.background = background  # sRGB, or None for a transparent background
+
+
 def load_image(path: str | Path) -> np.ndarray:
     """Load any Pillow-readable image as an RGBA uint8 array of shape (H, W, 4)."""
     with Image.open(path) as im:
         return np.asarray(im.convert("RGBA"), dtype=np.uint8).copy()
 
 
-def quantize(rgba: np.ndarray, n_colors: int | None = None) -> list[ColorMask]:
+def quantize(rgba: np.ndarray, n_colors: int | None = None) -> Palette:
     """Reduce artwork to its colours, with the background removed.
 
     The background is the transparent area if transparency dominates the image
@@ -54,7 +63,8 @@ def quantize(rgba: np.ndarray, n_colors: int | None = None) -> list[ColorMask]:
 
     :param n_colors: Number of artwork colours (background not counted).
         ``None`` detects it, up to ``MAX_COLORS``.
-    :return: One mask per colour, largest area first. Masks never overlap.
+    :return: One mask per colour, largest area first, and the background colour
+        (``None`` if transparent). Masks never overlap.
     """
     if rgba.ndim != 3 or rgba.shape[2] != 4:
         raise ValueError(f"expected an RGBA array of shape (H, W, 4), got {rgba.shape}")
@@ -70,35 +80,74 @@ def quantize(rgba: np.ndarray, n_colors: int | None = None) -> list[ColorMask]:
     transparent_background = _border(~opaque).mean() >= 0.5
 
     sample = rgb[flat] if flat.sum() >= 0.1 * opaque.sum() else rgb[opaque]
-    # Thin strokes have no flat pixels. Add the edge pixels that no blend of
-    # the flat colours explains, so their colours can join the palette.
-    edges = rgb[opaque & ~flat]
-    residual, _ = _best_blend(edges.astype(np.float32), _palette(sample, None))
+    flat_palette = _palette(sample, None)
+    # Thin strokes have no flat pixels. The edge pixels that no blend of the
+    # flat colours explains belong to strokes of colours not found yet.
+    edges = rgb[opaque & ~flat].astype(np.float32)
+    residual, _ = _best_blend(edges, flat_palette)
     strokes = edges[residual > _BLEND_TOLERANCE]
-    if len(strokes):
-        sample = np.concatenate([sample, strokes])
 
-    k = None if n_colors is None else n_colors + (0 if transparent_background else 1)
-    palette = _palette(sample, k)
+    if n_colors is None:
+        min_count = max(3, int(_MIN_SHARE * len(sample)))
+        palette = np.vstack([flat_palette, *_stroke_colours(strokes, flat_palette, min_count)])
+    else:
+        k = n_colors + (0 if transparent_background else 1)
+        palette = _palette(np.concatenate([sample, strokes.astype(sample.dtype)]), k)
 
     labels = _assign(rgb, opaque, flat, palette)
+    background = None
     if not transparent_background:
         border = _border(labels)
-        labels[labels == np.bincount(border[border >= 0]).argmax()] = -1
+        bg_label = np.bincount(border[border >= 0]).argmax()
+        background = _colour_of(rgb, labels == bg_label, flat, palette[bg_label])
+        labels[labels == bg_label] = -1
 
     layers = []
     for index, centre in enumerate(palette):
         mask = labels == index
-        if not mask.any():
-            continue
-        core = rgb[mask & flat]
-        color = np.median(core, axis=0) if len(core) else centre
-        layers.append(ColorMask(color=tuple(int(round(c)) for c in color), mask=mask))
+        if mask.any():
+            layers.append(ColorMask(color=_colour_of(rgb, mask, flat, centre), mask=mask))
 
     if not layers:
         raise ValueError("no foreground found in image")
     layers.sort(key=lambda layer: int(layer.mask.sum()), reverse=True)
-    return layers
+    return Palette(layers, background)
+
+
+def _colour_of(rgb, mask, flat, fallback) -> tuple[int, int, int]:
+    """Median colour of the flat pixels under ``mask``."""
+    core = rgb[mask & flat]
+    color = np.median(core, axis=0) if len(core) else fallback
+    return tuple(int(round(c)) for c in color)
+
+
+def _stroke_colours(px: np.ndarray, known: np.ndarray, min_count: int) -> list[np.ndarray]:
+    """Colours of thin strokes, found from pixels that no known colour explains.
+
+    A stroke pixel is the stroke's colour blended with the colour around it,
+    so its lighter (or darker) shades are blends, not colours of their own.
+    Each round takes the most saturated half of the unexplained pixels (the
+    stroke centres) as a new colour, then drops every pixel that is now a
+    blend of known colours, until too few pixels are left.
+    """
+    found: list[np.ndarray] = []
+    palette = np.asarray(known, dtype=np.float32)
+    for _ in range(4 * MAX_COLORS):
+        if len(px) < min_count or len(palette) > MAX_COLORS:
+            break
+        distance = np.min([np.linalg.norm(px - c, axis=1) for c in palette], axis=0)
+        colour = np.median(px[distance >= np.median(distance)], axis=0)
+        off_blend, _ = _best_blend(colour[None, :], palette)
+        if off_blend[0] > 2 * _BLEND_TOLERANCE:
+            found.append(colour)
+            palette = np.vstack([palette, colour])
+            tolerance = _BLEND_TOLERANCE
+        else:
+            # Noisy blends of known colours (JPEG edges): no new colour.
+            tolerance = 2 * _BLEND_TOLERANCE
+        residual, _ = _best_blend(px, palette)
+        px = px[residual > tolerance]
+    return found
 
 
 def _border(a: np.ndarray) -> np.ndarray:
@@ -236,7 +285,7 @@ def _best_blend(
     for a, b in combinations(range(len(palette)), 2):
         ca, cb = palette[a], palette[b]
         ab = cb - ca
-        t = np.clip(((px - ca) @ ab) / max(float(ab @ ab), 1e-6), 0.0, 1.0)
+        t = np.clip(((px - ca) @ ab) / max(float(ab @ ab), 1e-6), -_OVERSHOOT, 1.0 + _OVERSHOOT)
         residual = np.linalg.norm(px - (ca + t[:, None] * ab), axis=1)
         consider(residual, np.where(t < 0.5, a, b), allowed[:, a] & allowed[:, b])
     return best_residual, best_label

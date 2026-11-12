@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from manifold3d import CrossSection, Error, FillRule, Manifold
+from manifold3d import CrossSection, Error, FillRule, Manifold, OpType
 from shapely.geometry import MultiPolygon
 
 
@@ -33,17 +33,23 @@ def extrude(geom: MultiPolygon, height: float, z0: float = 0.0) -> Manifold:
     return solid
 
 
-def extrude_layers(layers: list[MultiPolygon], depths: list[float]) -> list[Manifold]:
-    """Extrude each colour layer from the bed up to its own depth.
+def extrude_layers(
+    layers: list[MultiPolygon], depths: list[float], bottoms: list[float] | None = None
+) -> list[Manifold]:
+    """Extrude each layer from its bottom (default: the bed) up by its depth.
 
-    Later layers sit on top of earlier ones: wherever bodies would overlap,
-    the later (upper) body is subtracted from the earlier (lower) one, so no
-    two colour bodies share any volume.
+    Later layers win shared space: wherever bodies would overlap, the later
+    body is subtracted from every earlier one, so no two bodies share any
+    volume. Put a backing plate first to have colours sit on it or be inlaid
+    into it.
     """
-    if len(layers) != len(depths):
-        raise ValueError(f"got {len(layers)} layers but {len(depths)} depths")
+    bottoms = [0.0] * len(layers) if bottoms is None else bottoms
+    if not len(layers) == len(depths) == len(bottoms):
+        raise ValueError(
+            f"got {len(layers)} layers, {len(depths)} depths and {len(bottoms)} bottoms"
+        )
 
-    bodies = [extrude(layer, depth) for layer, depth in zip(layers, depths)]
+    bodies = [extrude(g, d, z0) for g, d, z0 in zip(layers, depths, bottoms)]
     above = Manifold()
     for i in reversed(range(len(bodies))):
         body = bodies[i] - above
@@ -51,6 +57,13 @@ def extrude_layers(layers: list[MultiPolygon], depths: list[float]) -> list[Mani
         above = above + body
         bodies[i] = body
     return bodies
+
+
+def union(bodies: list[Manifold]) -> Manifold:
+    """All bodies merged into one solid."""
+    solid = Manifold.batch_boolean(bodies, OpType.Add) if bodies else Manifold()
+    _check(solid)
+    return solid
 
 
 def to_mesh(solid: Manifold) -> Mesh:

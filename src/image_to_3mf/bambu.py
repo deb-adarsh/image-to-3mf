@@ -100,14 +100,16 @@ def load_bambu_project(path: str | Path) -> BambuProject:
     return BambuProject(application=application, settings=settings)
 
 
-def model_settings_xml(object_id: int, object_name: str, parts: list[tuple[int, str, int]]) -> str:
+def model_settings_xml(
+    object_id: int, object_name: str, parts: list[tuple[int, str, int, int]]
+) -> str:
     """Per-object and per-part settings, as Bambu Studio writes them.
 
     :param object_id: Id of the parent object in the 3D model.
-    :param parts: ``(mesh object id, name, triangle count)`` for each part, in
-        filament order: part ``i`` is printed with filament ``i + 1``.
+    :param parts: ``(mesh object id, name, triangle count, filament slot)``
+        for each part; slots are 1-based.
     """
-    total = sum(count for _, _, count in parts)
+    total = sum(part[2] for part in parts)
     out = [
         '<?xml version="1.0" encoding="UTF-8"?>',
         "<config>",
@@ -116,7 +118,7 @@ def model_settings_xml(object_id: int, object_name: str, parts: list[tuple[int, 
         '    <metadata key="extruder" value="1"/>',
         f'    <metadata face_count="{total}"/>',
     ]
-    for slot, (part_id, name, count) in enumerate(parts, start=1):
+    for part_id, name, count, slot in parts:
         out += [
             f'    <part id="{part_id}" subtype="normal_part">',
             f'      <metadata key="name" value={quoteattr(name)}/>',

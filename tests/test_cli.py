@@ -62,15 +62,17 @@ def test_ring_to_stl(tmp_path, capsys):
     assert mesh.is_watertight
     assert mesh.is_winding_consistent
     # Image is 200 px wide -> 0.5 mm/px; the ring is 100 px across -> 50 mm.
-    assert mesh.extents == pytest.approx((50, 50, 3), abs=0.6)
+    # Height: 1.5 mm plate + 3 mm raised ring, merged into one solid.
+    assert mesh.extents == pytest.approx((50, 50, 4.5), abs=0.6)
     assert "1 part(s)" in capsys.readouterr().out
 
 
 def test_sample_logo(tmp_path, capsys):
     out = tmp_path / "logo.3mf"
     assert main([str(SAMPLES / "logo_bw.png"), "-o", str(out), "--width", "80"]) == 0
-    [(colour, mesh)] = _read_parts(out)
-    assert mesh.is_watertight
+    (plate_colour, plate), (colour, mesh) = _read_parts(out)
+    assert plate_colour == "#FFFFFFFF"  # the image background
+    assert plate.is_watertight and mesh.is_watertight
     # Ring, star and the three letters of "3MF".
     assert "5 part(s)" in capsys.readouterr().out
 
@@ -81,13 +83,79 @@ def test_sample_apple_has_one_watertight_body_per_colour(tmp_path, capsys):
 
     assert _strict_warnings(out) == 0
     parts = _read_parts(out)
-    assert [c for c, _ in parts] == ["#C81E28FF", "#3CA03CFF", "#6E461EFF", "#FAFAFAFF"]
+    # A plate in the largest colour (the background is transparent), then the colours.
+    assert [c for c, _ in parts] == ["#C81E28FF", "#C81E28FF", "#3CA03CFF", "#6E461EFF", "#FAFAFAFF"]
     assert all(m.is_watertight and m.volume > 0 for _, m in parts)
-    # Depths: the first colour 2 mm, the rest repeat the last value, 3 mm.
-    assert [round(m.bounds[1][2], 3) for _, m in parts] == [2, 3, 3, 3]
+    # 1.5 mm plate; colours stand on it, the first 2 mm, the rest repeat 3 mm.
+    assert [round(m.bounds[1][2], 3) for _, m in parts] == [1.5, 3.5, 4.5, 4.5, 4.5]
+    assert {round(m.bounds[0][2], 3) for _, m in parts[1:]} == {1.5}
     out = capsys.readouterr().out
     assert out.count("1 part(s)") == 4
+    assert "base plate: filament 1 #C81E28" in out
     assert "filament 4: #FAFAFA" in out
+
+
+def test_plate_shares_a_filament_with_the_same_colour(tmp_path):
+    out = tmp_path / "apple.3mf"
+    assert main([str(SAMPLES / "apple.png"), "-o", str(out)]) == 0
+    settings = ET.fromstring(zipfile.ZipFile(out).read("Metadata/model_settings.config"))
+    slots = [
+        next(m.get("value") for m in part.findall("metadata") if m.get("key") == "extruder")
+        for part in settings.iter("part")
+    ]
+    assert slots == ["1", "1", "2", "3", "4"]
+
+
+def test_inlay_style_is_flush(tmp_path):
+    out = tmp_path / "apple.3mf"
+    assert main([str(SAMPLES / "apple.png"), "-o", str(out), "--style", "inlay", "--base", "2"]) == 0
+    parts = _read_parts(out)
+    assert all(m.is_watertight for _, m in parts)
+    assert {round(m.bounds[1][2], 3) for _, m in parts} == {2.0}  # one flat top
+    assert {round(m.bounds[0][2], 3) for _, m in parts[1:]} == {1.4}  # 0.6 mm inlays
+    # The plate keeps its full footprint: colours are cut into it.
+    plate = parts[0][1]
+    assert plate.volume < plate.area  # far below footprint x 2 mm once inlays are removed
+
+
+def test_inlay_needs_a_plate_deep_enough(tmp_path, capsys):
+    args = [str(SAMPLES / "apple.png"), "-o", str(tmp_path / "a.3mf"), "--style", "inlay"]
+    assert main(args + ["--base", "0"]) == 1
+    assert main(args + ["--base", "1", "--depths", "1.5"]) == 1
+    assert "deeper than" in capsys.readouterr().err
+
+
+def test_no_plate(tmp_path):
+    out = tmp_path / "apple.3mf"
+    assert main([str(SAMPLES / "apple.png"), "-o", str(out), "--base", "0"]) == 0
+    parts = _read_parts(out)
+    assert len(parts) == 4
+    assert {round(m.bounds[0][2], 3) for _, m in parts} == {0.0}
+
+
+def test_margin_widens_the_plate(tmp_path):
+    a, b = tmp_path / "a.3mf", tmp_path / "b.3mf"
+    assert main([str(SAMPLES / "apple.png"), "-o", str(a)]) == 0
+    assert main([str(SAMPLES / "apple.png"), "-o", str(b), "--margin", "3"]) == 0
+    width_a = np.ptp(_read_parts(a)[0][1].vertices[:, 0])
+    width_b = np.ptp(_read_parts(b)[0][1].vertices[:, 0])
+    assert width_b == pytest.approx(width_a + 6, abs=0.1)
+
+
+def test_text_line(tmp_path, capsys):
+    plain, texted = tmp_path / "plain.3mf", tmp_path / "text.3mf"
+    assert main([str(SAMPLES / "logo_bw.png"), "-o", str(plain)]) == 0
+    capsys.readouterr()
+    assert main([str(SAMPLES / "logo_bw.png"), "-o", str(texted), "--text", "Hi", "--text-size", "10"]) == 0
+
+    # Ink-coloured text below the artwork, held by one connected plate.
+    (_, plate), (_, ink) = _read_parts(texted)
+    (_, _), (_, plain_ink) = _read_parts(plain)
+    assert ink.bounds[0][1] < plain_ink.bounds[0][1] - 10
+    assert plate.is_watertight
+    assert plate.euler_number == 2  # one closed solid without holes: the plate is one piece
+    # 5 logo parts, plus "H" and the stem and dot of "i".
+    assert "8 part(s)" in capsys.readouterr().out
 
 
 def test_bambu_project_template(tmp_path, capsys, bambu_template):
@@ -115,7 +183,7 @@ def test_bambu_project_needs_3mf_output(tmp_path, capsys, bambu_template):
 
 def test_colors_override(tmp_path, capsys):
     out = tmp_path / "apple.3mf"
-    assert main([str(SAMPLES / "apple.png"), "-o", str(out), "--colors", "2"]) == 0
+    assert main([str(SAMPLES / "apple.png"), "-o", str(out), "--colors", "2", "--base", "0"]) == 0
     assert len(_read_parts(out)) == 2
 
 

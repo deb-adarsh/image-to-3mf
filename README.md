@@ -12,8 +12,8 @@ This is a proof of concept. See [CLAUDE.md](CLAUDE.md) for the full plan, pipeli
 | 1. Single colour: black-and-white logo → extruded STL | Done |
 | 2. Multi-colour geometry: N colours → N watertight bodies in a core-spec 3MF | Done |
 | 3. Bambu-ready: filaments pre-assigned in Bambu Studio | Built, not yet checked in Bambu Studio |
-| 4. Polish: backing plate, margin, min-feature cleanup, text | Next |
-| 5. Test prints | |
+| 4. Polish: backing plate, margin, min-feature cleanup, text | Done |
+| 5. Test prints | Next |
 
 ## Usage
 
@@ -21,27 +21,36 @@ Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 uv sync
-uv run image-to-3mf samples/apple.png --width 80 --depths 2 3
+uv run image-to-3mf samples/apple.png
+uv run image-to-3mf samples/logo_bw.png --text "Image to 3MF" --margin 2
+uv run image-to-3mf samples/diagram.png --style inlay --base 2
 ```
 
-This writes `out/apple.3mf`: one object made of one part per colour, each part a
-separate watertight body with its own display colour. Use `-o name.stl` for a
-single-colour STL instead.
+Each writes `out/<input>.3mf`: one object made of a backing plate plus one part per
+colour, each part a separate watertight body with its own display colour. Use
+`-o name.stl` for a single-colour STL instead.
 
 | Option | Meaning | Default |
 |---|---|---|
-| `--width` | Output width in mm (height follows the aspect ratio) | 80 |
+| `--width` | Width of the image in mm (height follows the aspect ratio) | 80 |
 | `--colors` | Number of colours, not counting the background | detected (up to 6) |
-| `--depths` | Depth in mm per colour, largest colour first; the last value repeats | 2 |
+| `--style` | `raised`: colours stand on the plate. `inlay`: colours are set into the plate, flush with its top | `raised` |
+| `--depths` | Colour depth in mm, largest colour first; the last value repeats | 1 raised, 0.6 inlay |
+| `--base` | Backing plate thickness in mm; 0 for none (raised only) | 1.5 |
+| `--margin` | Border of plate around the artwork in mm | 0 |
+| `--min-feature` | Thinnest printable feature in mm; thinner strokes are widened, smaller specks dropped | 0.8 |
+| `--text` | A line of text, set below the artwork | none |
+| `--font` | TrueType/OpenType font file for `--text` | Pillow's built-in font |
+| `--text-size` | Text size in mm (the font's em size) | 8 |
 | `--smooth` | Tracing smoothness, 0 (sharp corners) to 1.334 | 1.0 |
 | `-o`, `--output` | Output path, `.3mf` or `.stl` | `out/<input>.3mf` |
 | `--bambu-project` | A project 3MF saved by Bambu Studio to use as a template (see below) | none |
 
 ### Bambu Studio and OrcaSlicer
 
-Every 3MF carries `Metadata/model_settings.config`, which gives colour 1 filament 1,
-colour 2 filament 2, and so on (largest colour first), and places the object in the
-middle of a 256 mm plate.
+Every 3MF carries `Metadata/model_settings.config`, which gives each colour its own
+filament (the plate first, then the colours, largest first; parts of the same
+colour share a filament), and places the object in the middle of a 256 mm plate.
 
 Filament colours and types live in `Metadata/project_settings.config`. Bambu Studio
 loads that file as the project's complete printer, process and filament setup, so a
@@ -57,15 +66,23 @@ The output then reuses the template's printer, process and filament settings, se
 filament colours 1..N to the image colours, and centres the object on that printer's
 plate. Filament types stay as they are in the template.
 
-How the image is read:
+How the image becomes a print:
 
 - The background is the transparent area if transparency fills most of the image
-  border, otherwise the colour that fills most of the border. It is not printed.
-  Until the backing plate arrives (milestone 4), areas of the background colour
-  inside the artwork become holes.
-- Colours are listed and stacked largest area first. Where colour bodies would
-  touch or overlap, the later colour wins, so no two bodies share any volume.
-- The whole image is scaled to `--width`, so blank margins around the artwork are kept.
+  border, otherwise the colour that fills most of the border. It is not printed as
+  its own part.
+- The backing plate takes the background colour, or the largest colour if the
+  background is transparent. It follows the artwork's outline (grown by `--margin`)
+  with holes filled, so background-coloured details inside the artwork show the
+  plate. If the outline falls apart into separate pieces, the plate becomes their
+  convex hull so it holds everything together.
+- Specks smaller than `--min-feature` squared fold into the neighbouring colour;
+  strokes thinner than `--min-feature` are widened to it.
+- Text takes the artwork colour that contrasts most with the plate.
+- Where colour bodies would touch or overlap, the later colour wins, so no two
+  bodies share any volume. Inlays are cut out of the plate.
+- The whole image is scaled to `--width`, so blank margins around the artwork are
+  kept in the text placement but not in the plate.
 
 ## Development
 
