@@ -129,3 +129,18 @@ def test_add_to_layer_moves_area_between_layers():
     a2, b2 = add_to_layer([a, b], 1, MultiPolygon([box(5, 0, 15, 10)]))
     assert a2.area == pytest.approx(50)
     assert b2.area == pytest.approx(150)
+
+
+def test_stand_alone_dot_is_kept_and_widened():
+    """Regression: the dot of a small "i" was dropped as a speck."""
+    stem = MultiPolygon([box(0, 0, 0.9, 5)])
+    dot = MultiPolygon([box(0.1, 6, 0.7, 6.6)])  # 0.36 mm2: below 0.8 x 0.8, but on its own
+    [kept] = remove_specks([MultiPolygon(list(stem.geoms) + list(dot.geoms))], 0.8)
+    assert len(kept.geoms) == 2
+    [widened] = thicken([kept], 0.8)
+    assert min(p.area for p in widened.geoms) > 0.64
+
+
+def test_tiny_stand_alone_speck_is_dropped():
+    [result] = remove_specks([MultiPolygon([box(0, 0, 5, 5), box(10, 10, 10.2, 10.2)])], 0.8)
+    assert len(result.geoms) == 1

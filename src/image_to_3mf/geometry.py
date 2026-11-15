@@ -20,14 +20,16 @@ def as_multipolygon(geom) -> MultiPolygon:
     return MultiPolygon(parts)
 
 
-def absorb_small_pieces(layers: list[MultiPolygon], min_area: float) -> list[MultiPolygon]:
+def absorb_small_pieces(
+    layers: list[MultiPolygon], min_area: float, keep_isolated: float | None = None
+) -> list[MultiPolygon]:
     """Merge every polygon smaller than ``min_area`` into the layer it borders most.
 
     Layers are expected not to overlap. A small piece is given to the layer
     that shares the longest border with it, so the layers keep covering the
     same area without gaps. A piece that borders no other layer, or only
-    touches it at a point, is dropped: afterwards no layer has a polygon
-    smaller than ``min_area``.
+    touches it at a point, is dropped, unless it is at least ``keep_isolated``
+    in area: a dot standing on its own is a detail, not noise.
     """
     kept = [[p for p in layer.geoms if p.area >= min_area] for layer in layers]
     small = [(i, p) for i, layer in enumerate(layers) for p in layer.geoms if p.area < min_area]
@@ -36,6 +38,7 @@ def absorb_small_pieces(layers: list[MultiPolygon], min_area: float) -> list[Mul
 
     kept_geoms = [MultiPolygon(parts) for parts in kept]
     additions: list[list[Polygon]] = [[] for _ in layers]
+    isolated: list[list[Polygon]] = [[] for _ in layers]
     for i, piece in small:
         # Thicken the piece's outline a hair to measure shared border length.
         rim_width = _rim_width(piece)
@@ -48,11 +51,13 @@ def absorb_small_pieces(layers: list[MultiPolygon], min_area: float) -> list[Mul
         if touch[best] > 0:
             # Borders that are a rounding error apart must coincide to fuse.
             additions[best].append(shapely.snap(piece, kept_geoms[best], rim_width))
+        elif keep_isolated is not None and piece.area >= keep_isolated:
+            isolated[i].append(piece)
 
     result = []
-    for parts, extra in zip(kept, additions):
+    for parts, extra, alone in zip(kept, additions, isolated):
         merged = as_multipolygon(shapely.unary_union(parts + extra)) if extra else MultiPolygon(parts)
-        result.append(MultiPolygon([p for p in merged.geoms if p.area >= min_area]))
+        result.append(MultiPolygon([p for p in merged.geoms if p.area >= min_area] + alone))
     return result
 
 

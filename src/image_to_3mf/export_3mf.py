@@ -25,7 +25,7 @@ from image_to_3mf.extrude import Mesh
 CORE_NS = "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"
 MODEL_PATH = "3D/3dmodel.model"
 APPLICATION = "image-to-3mf"
-DECIMALS = 4  # 0.1 micron: far below printer resolution
+DECIMALS = 4  # for the build transform: 0.1 micron, far below printer resolution
 
 # Like Bambu Studio, declare no content type for the Metadata/*.config files.
 _CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8"?>
@@ -139,7 +139,7 @@ def _model_xml(parts, meshes, name, application, translation) -> str:
         out.append("   <mesh>")
         out.append("    <vertices>")
         out.extend(
-            f'     <vertex x="{x:.{DECIMALS}f}" y="{y:.{DECIMALS}f}" z="{z:.{DECIMALS}f}"/>'
+            f'     <vertex x="{_fmt(x)}" y="{_fmt(y)}" z="{_fmt(z)}"/>'
             for x, y, z in vertices
         )
         out.append("    </vertices>")
@@ -172,10 +172,37 @@ def _centre_on(meshes, centre: tuple[float, float]) -> tuple[float, float, float
 
 
 def _dedupe(mesh: Mesh) -> tuple[np.ndarray, np.ndarray]:
-    """Merge vertices that are identical once written, and drop collapsed triangles."""
-    rounded = np.round(mesh.vertices, DECIMALS) + 0.0  # + 0.0 turns -0.0 into 0.0
-    vertices, inverse = np.unique(rounded, axis=0, return_inverse=True)
+    """Merge exactly identical vertices, unless that would break the mesh.
+
+    Vertices are never rounded together: boolean operations can leave
+    distinct vertices a fraction of a micron apart, and merging those opens
+    holes. Even exact duplicates are kept apart where the geometry kernel
+    made them on purpose: where two lobes of a shape touch at a single
+    point, each lobe has its own vertex there, and fusing them would leave
+    edges shared by four triangles. Coordinates are float32 (the kernel's
+    precision) and written so they read back exactly.
+    """
+    exact = np.asarray(mesh.vertices, dtype=np.float32) + np.float32(0.0)  # -0.0 -> 0.0
+    vertices, inverse = np.unique(exact, axis=0, return_inverse=True)
     triangles = inverse.reshape(-1)[mesh.triangles]
     a, b, c = triangles.T
-    keep = (a != b) & (b != c) & (a != c)
-    return vertices, triangles[keep]
+    triangles = triangles[(a != b) & (b != c) & (a != c)]
+    if _is_closed_manifold(triangles) or not _is_closed_manifold(mesh.triangles):
+        return vertices, triangles
+    return exact, np.asarray(mesh.triangles)
+
+
+def _is_closed_manifold(triangles: np.ndarray) -> bool:
+    """True if every edge is shared by exactly two triangles, in opposite directions."""
+    edges = np.concatenate([triangles[:, [0, 1]], triangles[:, [1, 2]], triangles[:, [2, 0]]])
+    directed, counts = np.unique(edges, axis=0, return_counts=True)
+    if (counts != 1).any():
+        return False
+    undirected = np.sort(directed, axis=1)
+    _, pair_counts = np.unique(undirected, axis=0, return_counts=True)
+    return bool((pair_counts == 2).all())
+
+
+def _fmt(value: np.float32) -> str:
+    """Shortest decimal that reads back as exactly this float32."""
+    return np.format_float_positional(value, unique=True, trim="-")

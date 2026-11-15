@@ -39,14 +39,17 @@ def scale_to_mm(
 
 
 def remove_specks(
-    layers: list[MultiPolygon], min_area: float = MIN_FEATURE**2
+    layers: list[MultiPolygon], min_feature: float = MIN_FEATURE
 ) -> list[MultiPolygon]:
-    """Fold pieces too small to print into the neighbouring colour.
+    """Fold specks smaller than ``min_feature`` squared into the neighbouring colour.
 
+    A speck between colours is noise (an anti-aliasing or JPEG artifact). A
+    small piece standing on its own, such as the dot of an "i", is a detail:
+    it is kept if at least a quarter of that area, for ``thicken`` to widen.
     Layers must not overlap; the result still covers the same area, except
-    for specks that touch no other colour, which are dropped.
+    for the tiniest stand-alone specks, which are dropped.
     """
-    return absorb_small_pieces(layers, min_area)
+    return absorb_small_pieces(layers, min_feature**2, keep_isolated=(min_feature / 2) ** 2)
 
 
 def thicken(layers: list[MultiPolygon], min_feature: float = MIN_FEATURE) -> list[MultiPolygon]:

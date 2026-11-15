@@ -249,12 +249,17 @@ def _assign(
         axis=1,
     )
 
-    residual, blend_label = _best_blend(rgb[edge].astype(np.float32), palette, nearby)
+    px = rgb[edge].astype(np.float32)
+    residual, blend_label = _best_blend(px, palette, nearby)
+    # A thin stroke is no blend of its neighbours, but its edges are still a
+    # blend of its own colour and the background: try every pair of colours
+    # before falling back to the nearest colour (a grey whisker edge is not pink).
+    any_residual, any_label = _best_blend(px, palette)
 
-    # Edge pixels that are no blend of their neighbours (thin strokes) keep
-    # their nearest palette colour.
-    is_blend = residual <= _BLEND_TOLERANCE
     edge_labels = labels[edge]
+    is_any_blend = any_residual <= _BLEND_TOLERANCE
+    edge_labels[is_any_blend] = any_label[is_any_blend]
+    is_blend = residual <= _BLEND_TOLERANCE
     edge_labels[is_blend] = blend_label[is_blend]
     labels[edge] = edge_labels
     return labels

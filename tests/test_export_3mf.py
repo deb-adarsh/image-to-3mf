@@ -177,3 +177,27 @@ def test_filament_slots_must_not_skip(tmp_path):
     low, high = _two_parts()
     with pytest.raises(ValueError, match="without gaps"):
         write_3mf(tmp_path / "x.3mf", [Part("a", (0, 0, 0), low.mesh, filament=1), Part("b", (1, 1, 1), high.mesh, filament=3)])
+
+
+def test_nearly_coincident_vertices_stay_apart():
+    """Regression: rounding merged vertices 0.02 microns apart and opened holes."""
+    vertices = np.array([[0, 0, 0], [2e-5, 0, 0], [0, 1, 0], [0, 0, 1]], dtype=np.float32)
+    triangles = np.array([[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]])
+    root = ET.fromstring(model_xml([Part("p", (0, 0, 0), Mesh(vertices, triangles))]))
+    xs = [float(v.get("x")) for v in root.iterfind(".//m:vertex", NS)]
+    assert len(xs) == 4 and len(root.findall(".//m:triangle", NS)) == 4
+    assert np.float32(max(xs)) == np.float32(2e-5)  # written exactly
+
+
+def test_lobes_touching_at_a_point_stay_watertight():
+    """Regression: merging the kernel's two vertices at a pinch point made the mesh non-manifold."""
+    from image_to_3mf.extrude import extrude
+
+    lobes = MultiPolygon([box(0, 0, 1, 1), box(1, 1, 2, 2)])  # touch at (1, 1)
+    mesh = to_mesh(extrude(lobes, 1.0))
+    root = ET.fromstring(model_xml([Part("p", (0, 0, 0), mesh)]))
+    v = [[float(x.get(k)) for k in "xyz"] for x in root.iterfind(".//m:vertex", NS)]
+    t = [[int(x.get(k)) for k in ("v1", "v2", "v3")] for x in root.iterfind(".//m:triangle", NS)]
+    import trimesh
+
+    assert trimesh.Trimesh(v, t, process=False).is_watertight

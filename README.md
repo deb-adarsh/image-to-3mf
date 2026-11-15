@@ -13,7 +13,7 @@ This is a proof of concept. See [CLAUDE.md](CLAUDE.md) for the full plan, pipeli
 | 2. Multi-colour geometry: N colours → N watertight bodies in a core-spec 3MF | Done |
 | 3. Bambu-ready: filaments pre-assigned in Bambu Studio | Built, not yet checked in Bambu Studio |
 | 4. Polish: backing plate, margin, min-feature cleanup, text | Done |
-| 5. Test prints | Next |
+| 5. Test prints | Files and checklist ready: see [TEST_PRINTS.md](TEST_PRINTS.md) |
 
 ## Usage
 
@@ -89,6 +89,7 @@ How the image becomes a print:
 ```bash
 uv run pytest                            # tests
 uv run python samples/make_samples.py    # regenerate sample images
+uv run python samples/make_test_prints.py  # build the test prints (TEST_PRINTS.md)
 ```
 
 Each pipeline stage is a separate module under `src/image_to_3mf/` with a pure

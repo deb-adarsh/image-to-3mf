@@ -130,3 +130,14 @@ def test_reports_the_background_colour():
     img = rgba(40, 40, color=(0, 0, 0), alpha=0)
     img[10:30, 10:30] = (*BLACK, 255)
     assert quantize(img).background is None
+
+
+def test_thin_stroke_edges_are_not_a_lookalike_colour():
+    """Regression: grey anti-aliased whisker pixels next to only white became pink."""
+    pink, dark = (240, 150, 170), (45, 35, 35)
+    img = rgba(40, 60, color=(255, 255, 255))
+    img[5:35, 40:55, :3] = pink  # a pink area elsewhere puts pink in the palette
+    img[20, 2:35, :3] = dark  # a 1 px whisker...
+    img[19, 2:35, :3] = (170, 165, 165)  # ...with a grey anti-aliased edge
+    layers = {layer.color: layer.mask for layer in quantize(img)}
+    assert not layers[pink][:, :38].any()

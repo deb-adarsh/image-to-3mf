@@ -124,8 +124,8 @@ def run(args: argparse.Namespace) -> Path:
         text = render_text(args.text, args.text_size, args.font)
         text_layer = _most_contrasting(colours, base_colour)
         layers = add_to_layer(layers, text_layer, place_below(text, layers, args.text_size / 2))
-    min_area = args.min_feature**2
-    layers = remove_specks(thicken(remove_specks(layers, min_area), args.min_feature), min_area)
+    layers = remove_specks(layers, args.min_feature)
+    layers = remove_specks(thicken(layers, args.min_feature), args.min_feature)
 
     kept = [i for i, g in enumerate(layers) if not g.is_empty]
     if not kept:
