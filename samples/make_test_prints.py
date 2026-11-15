@@ -2,7 +2,7 @@
 
 Run with: uv run python samples/make_test_prints.py [--bambu-project TEMPLATE.3mf]
 
-Writes one 3MF per sample to out/test-prints/. See TEST_PRINTS.md for what
+Writes one 3MF per sample to test-prints/. See TEST_PRINTS.md for what
 each print tests and what to check.
 """
 
@@ -14,7 +14,7 @@ from pathlib import Path
 from image_to_3mf.cli import main as convert
 
 HERE = Path(__file__).parent
-OUT = HERE.parent / "out" / "test-prints"
+OUT = HERE.parent / "test-prints"
 
 # (output name, sample, options): small prints, at most four filaments each.
 PRINTS = [

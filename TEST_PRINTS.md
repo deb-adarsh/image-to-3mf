@@ -13,7 +13,10 @@ or, to open them as ready-to-print Bambu Studio projects (see the README):
 uv run python samples/make_test_prints.py --bambu-project ~/path/to/template.3mf
 ```
 
-The files land in `out/test-prints/` (not committed).
+The files land in [`test-prints/`](test-prints/), which is committed so they can be
+downloaded from GitHub. Rebuild and commit them whenever the pipeline changes.
+Files built with `--bambu-project` carry your printer settings, so keep those
+out of the commit.
 
 ## The prints
 
